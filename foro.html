@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Foro Público</title>
+  <style>
+    body{margin:0;font-family:Arial;background:#0e1525;color:#e6eef8}
+    .panel{background:#141b2e;padding:14px;border-radius:10px}
+    button{padding:8px 12px;border-radius:6px;border:0;cursor:pointer;background:#2563eb;color:white}
+    input,textarea{width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:#0c1120;color:white}
+    #loginScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,8,18,0.9);z-index:50}
+    header{padding:14px;border-bottom:1px solid #222;display:flex;justify-content:space-between;align-items:center}
+    .small{font-size:13px;color:#9aa}
+  </style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="panel" style="width:360px;display:flex;flex-direction:column;gap:10px">
+    <h2>Entrar o crear cuenta</h2>
+    <input id="regUser" placeholder="Usuario" />
+    <input id="regPass" type="password" placeholder="Contraseña" />
+    <input id="regName" placeholder="Nombre público" />
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button id="helpBtn" style="background:#444">Ayuda</button>
+      <button id="registerBtn">Entrar / Crear</button>
+    </div>
+  </div>
+</div>
+
+<header>
+  <div style="font-weight:700">Foro Público</div>
+  <div id="userBox" class="small"></div>
+</header>
+
+<main style="padding:20px;display:flex;gap:20px">
+  <aside class="panel" style="width:320px">
+    <h3>Hilos</h3>
+    <input id="adminCode" placeholder="Código de administrador" style="margin-top:8px">
+    <div style="display:flex;justify-content:flex-end;margin-top:10px;font-size:26px;cursor:pointer" id="homeBtn">🏠</div>
+    <button id="newThreadBtn">Nuevo hilo</button>
+    <div id="threadsList" style="margin-top:14px;display:flex;flex-direction:column;gap:10px"></div>
+  </aside>
+
+  <section class="panel" style="flex:1">
+    <div id="mainContent">Seleccione un hilo.</div>
+  </section>
+</main>
+
+<div id="modal" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5)">
+  <div class="panel" style="width:600px;display:flex;flex-direction:column;gap:10px">
+    <h2>Nuevo hilo</h2>
+    <input id="threadTitle" placeholder="Título" />
+    <textarea id="threadBody" rows="6"></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button id="cancelBtn" style="background:#444">Cancelar</button>
+      <button id="publishBtn">Publicar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Storage
+const STORAGE_USERS = 'foro_users_v1';
+const STORAGE_THREADS = 'foro_threads_v1';
+const STORAGE_CURRENT = 'foro_current_user_v1';
+
+let users = {};
+let threads = [];
+let currentUser = null;
+
+function loadData(){
+  try{ users = JSON.parse(localStorage.getItem(STORAGE_USERS) || '{}'); }catch(e){}
+  try{ threads = JSON.parse(localStorage.getItem(STORAGE_THREADS) || '[]'); }catch(e){}
+  currentUser = localStorage.getItem(STORAGE_CURRENT) || null;
+}
+function saveData(){
+  localStorage.setItem(STORAGE_USERS, JSON.stringify(users));
+  localStorage.setItem(STORAGE_THREADS, JSON.stringify(threads));
+  if(currentUser) localStorage.setItem(STORAGE_CURRENT, currentUser); else localStorage.removeItem(STORAGE_CURRENT);
+}
+
+function escapeHtml(s){return s?s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#039;") : ''}
+
+const loginScreen=document.getElementById('loginScreen');
+const regUserEl=document.getElementById('regUser');
+const regPassEl=document.getElementById('regPass');
+const regNameEl=document.getElementById('regName');
+const registerBtn=document.getElementById('registerBtn');
+const helpBtn=document.getElementById('helpBtn');
+const userBox=document.getElementById('userBox');
+
+function ensureLogged(){
+  if(currentUser && users[currentUser]){
+    loginScreen.style.display='none';
+    userBox.innerHTML = `Conectado: <b>${escapeHtml(users[currentUser].name)}</b> <button onclick="logout()" style="background:#444;padding:4px 8px;border-radius:6px">Salir</button>`;
+  } else {
+    loginScreen.style.display='flex';
+    userBox.innerHTML='';
+  }
+}
+
+registerBtn.onclick = ()=>{
+  const u=regUserEl.value.trim();
+  const p=regPassEl.value.trim();
+  const n=regNameEl.value.trim();
+  if(!u||!p) return alert('Completar usuario y contraseña');
+
+  if(users[u]){
+    if(users[u].pass !== p) return alert('Contraseña incorrecta');
+    currentUser=u;
+    if(n) users[u].name=n;
+    saveData(); ensureLogged(); renderThreads(); return;
+  }
+
+  users[u]={pass:p,name:n||u};
+  currentUser=u;
+  saveData(); ensureLogged(); renderThreads();
+};
+
+helpBtn.onclick=()=>alert('Completar usuario, contraseña y nombre público');
+function logout(){currentUser=null;saveData();ensureLogged();}
+
+const threadsListEl=document.getElementById('threadsList');
+const mainContent=document.getElementById('mainContent');
+
+function renderThreads(){
+  threadsListEl.innerHTML='';
+  threads.forEach(th=>{
+    const div=document.createElement('div');
+    div.className='panel'; div.style.padding='10px'; div.style.cursor='pointer';
+
+    let html = `
+      <b>${escapeHtml(th.title)}</b><br>
+      <span class='small'>por ${escapeHtml(th.author)}</span>
+    `;
+
+    if(window.isAdmin){
+      html += `<span style="float:right;cursor:pointer" onclick="event.stopPropagation();deleteThread('${th.id}')">🗑️</span>`;
+    }
+
+    div.innerHTML=html;
+    div.onclick=()=>viewThread(th.id);
+    threadsListEl.appendChild(div);
+  });
+}
+
+function viewThread(id){
+  const t = threads.find(x=>x.id===id);
+  if(!t) return;
+  mainContent.innerHTML = `
+    <h2>${escapeHtml(t.title)}</h2>
+    <div class='small'>por ${escapeHtml(t.author)}</div>
+    <p style='white-space:pre-wrap'>${escapeHtml(t.body)}</p>
+  `;
+}
+
+function deleteThread(id){
+  threads = threads.filter(x=>x.id!==id);
+  saveData(); renderThreads(); mainContent.innerHTML='Seleccione un hilo.';
+}
+
+// Admin code
+const adminCodeEl=document.getElementById('adminCode');
+adminCodeEl.onkeydown=(e)=>{
+  if(e.key==='Enter'){
+    if(adminCodeEl.value.trim()==="T.V.A.N Tu Vieja Autista Nacional"){
+      alert('Admin activado'); window.isAdmin=true; renderThreads();
+    } else { alert('Código incorrecto'); window.isAdmin=false; renderThreads(); }
+  }
+};
+
+// Modal
+const modal=document.getElementById('modal');
+const threadTitle=document.getElementById('threadTitle');
+const threadBody=document.getElementById('threadBody');
+const cancelBtn=document.getElementById('cancelBtn');
+const publishBtn=document.getElementById('publishBtn');
+
+document.getElementById('newThreadBtn').onclick=()=>{
+  if(!currentUser) return alert('Debes iniciar sesión');
+  modal.style.display='flex'; threadTitle.value=''; threadBody.value='';
+};
+cancelBtn.onclick=()=> modal.style.display='none';
+publishBtn.onclick=()=>{
+  if(!currentUser) return alert('Debes iniciar sesión');
+  if(!threadTitle.value.trim()) return alert('Falta título');
+  threads.push({id:Math.random().toString(36).slice(2), title:threadTitle.value.trim(), body:threadBody.value.trim(), author:users[currentUser].name});
+  saveData(); modal.style.display='none'; renderThreads(); mainContent.innerHTML='Seleccione un hilo.';
+};
+
+// Botón casita
+const homeBtn=document.getElementById('homeBtn');
+homeBtn.onclick=()=>{
+  renderThreads();
+  mainContent.innerHTML='Seleccione un hilo.';
+};
+
+loadData(); ensureLogged(); renderThreads();
+</script>
+</body>
+</html>
